@@ -1,0 +1,14 @@
+[Unit]
+Description=AWS Greengrass Nucleus Lite
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=${bindir}/greengrassd --config ${sysconfdir}/greengrass/config.yaml
+Restart=on-failure
+User=ggc_user
+Group=ggc_group
+LimitNOFILE=1024
+
+[Install]
+WantedBy=multi-user.target

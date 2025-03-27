@@ -2,10 +2,10 @@ CONF_VERSION ?= "2"
 DISTRO ?= "poky"
 
 # mandatory
-require ${OEROOT}/../meta-aws-demos/conf/devices/${DEVICE}/config.conf
+require ${OEROOT}/../meta-aws-iot/conf/devices/${DEVICE}/config.conf
 
 # optional
-include ${OEROOT}/../meta-aws-demos/recipes-core/images/${IMAGE}/config.conf
+include ${OEROOT}/../meta-aws-iot/recipes-core/images/${IMAGE}/config.conf
 
 # Additional image features
 USER_CLASSES ?= "buildstats"

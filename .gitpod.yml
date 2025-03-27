@@ -1,0 +1,46 @@
+image: gitpod/workspace-base
+
+env:
+  DISTRO: poky-altcfg
+  DEVICE: raspberrypi5-64
+  IMAGE: aws-iot-greengrass-lite-with-arpscan
+
+tasks:
+  - name: Setup and Configure Build Environment
+    command: |
+      sudo apt-get update && sudo apt-get install -y --no-install-recommends \
+          gawk wget git diffstat unzip texinfo gcc build-essential \
+          chrpath socat cpio python3 python3-pip python3-pexpect xz-utils debianutils \
+          iputils-ping python3-git python3-jinja2 libegl1-mesa libsdl1.2-dev pylint \
+          python3-subunit mesa-common-dev zstd liblz4-tool file locales systemd || {
+        echo "ERROR: apt-get install failed" >&2;
+        exit 1;
+      }
+
+      sudo locale-gen en_US.UTF-8 || { echo "ERROR: locale-gen failed" >&2; exit 1; }
+      pip3 install --no-cache-dir pipoe || { echo "ERROR: pip3 install failed" >&2; exit 1; }
+
+      # Ensure git submodules are initialized and updated
+      git submodule update --init --recursive || { echo "ERROR: git submodule update failed" >&2; exit 1; }
+
+      export BB_ENV_PASSTHROUGH_ADDITIONS="DISTRO DEVICE IMAGE $BB_ENV_PASSTHROUGH_ADDITIONS"
+
+      # Run the Amazon build-init script (adjusted for meta-aws-iot)
+      ./meta-aws-iot/build-init build || { echo "ERROR: build-init failed" >&2; exit 1; }
+
+      # Correctly set the DEVICE and IMAGE variables
+      export DEVICE="$DEVICE"
+      export IMAGE="$IMAGE"
+
+      # Run bitbake
+      bitbake "$IMAGE"
+
+      echo "Build complete!"
+vscode:
+  extensions:
+    - ms-vscode.cpptools
+    - ms-python.python
+    - ms-azuretools.vscode-docker
+    - eamodio.gitlens
+    - ms-vscode-remote.remote-containers
+    - ms-yocto.yocto-devtools
