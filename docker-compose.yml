@@ -10,7 +10,7 @@ services:
       IMAGE: ${IMAGE:-aws-iot-greengrass-with-arpscan}
       DISTRO: ${DISTRO:-poky-altcfg}
       DEBIAN_FRONTEND: noninteractive
-    # entrypoint: /bin/bash  # Starts an interactive shell for debugging
+    entrypoint: /bin/bash  # Keep for debugging
     command: |
       bash -c "
         apt-get update || { echo 'apt-get update failed'; exit 1; }
@@ -29,7 +29,7 @@ services:
 
         # Run remaining commands as the 'yocto' user
         su - yocto -c '
-          export PATH=\"/home/yocto/.local/bin:$PATH\"  # Add pip install path
+          export PATH=\"/home/yocto/.local/bin:$PATH\"
           pip3 install --no-cache-dir --user pipoe || { echo \"pip install failed\"; exit 1; }
 
           [ -z \"$REPO_URL\" ] && { echo \"Error: REPO_URL not set\"; exit 1; }
@@ -52,6 +52,7 @@ services:
           export IMAGE=\"$IMAGE\"
           export DISTRO=\"$DISTRO\"
           source ./oe-init-build-env /app/build || { echo \"oe-init-build-env failed\"; exit 1; }
+          echo \"BBLAYERS += \\\"/app/repo/meta-aws-iot\\\"\" >> /app/build/conf/bblayers.conf
           bitbake \"$IMAGE\" || { echo \"BitBake failed\"; exit 1; }
 
           echo \"Build complete!\"
