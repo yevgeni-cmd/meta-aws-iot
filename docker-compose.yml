@@ -1,0 +1,62 @@
+services:
+  build:
+    image: ubuntu:22.04
+    volumes:
+      - yocto-build:/app/build
+    working_dir: /app
+    environment:
+      REPO_URL: ${REPO_URL}
+      DEVICE: ${DEVICE:-raspberrypi5-64}
+      IMAGE: ${IMAGE:-aws-iot-greengrass-with-arpscan}
+      DISTRO: ${DISTRO:-poky-altcfg}
+      DEBIAN_FRONTEND: noninteractive
+    # entrypoint: /bin/bash  # Starts an interactive shell for debugging
+    command: |
+      bash -c "
+        apt-get update || { echo 'apt-get update failed'; exit 1; }
+        apt-get install -y --no-install-recommends \\
+          gawk wget git diffstat unzip texinfo gcc build-essential \\
+          chrpath socat cpio python3 python3-pip python3-pexpect xz-utils debianutils \\
+          iputils-ping python3-git python3-jinja2 libegl1-mesa libsdl1.2-dev pylint \\
+          python3-subunit mesa-common-dev zstd liblz4-tool file locales systemd sudo || { echo 'Package install failed'; exit 1; }
+
+        locale-gen en_US.UTF-8
+        export LANG=en_US.UTF-8
+
+        # Create a non-root user and set up permissions
+        useradd -m -s /bin/bash yocto || { echo 'Failed to create user'; exit 1; }
+        chown -R yocto:yocto /app || { echo 'Failed to set ownership'; exit 1; }
+
+        # Run remaining commands as the 'yocto' user
+        su - yocto -c '
+          export PATH=\"/home/yocto/.local/bin:$PATH\"  # Add pip install path
+          pip3 install --no-cache-dir --user pipoe || { echo \"pip install failed\"; exit 1; }
+
+          [ -z \"$REPO_URL\" ] && { echo \"Error: REPO_URL not set\"; exit 1; }
+          if [ -d /app/repo/.git ]; then
+            echo \"Existing Git repo found, pulling updates...\"
+            cd /app/repo
+            git pull || { echo \"Git pull failed\"; exit 1; }
+          else
+            echo \"No Git repo found, cloning into /app/repo...\"
+            rm -rf /app/repo || { echo \"Failed to clear /app/repo\"; exit 1; }
+            git clone \"$REPO_URL\" /app/repo || { echo \"Git clone failed\"; exit 1; }
+          fi
+          cd /app/repo
+          git submodule update --init --recursive || { echo \"Submodule update failed\"; exit 1; }
+
+          [ -d /app/repo/poky ] || { echo \"poky directory not found\"; exit 1; }
+          cd /app/repo/poky
+
+          export DEVICE=\"$DEVICE\"
+          export IMAGE=\"$IMAGE\"
+          export DISTRO=\"$DISTRO\"
+          source ./oe-init-build-env /app/build || { echo \"oe-init-build-env failed\"; exit 1; }
+          bitbake \"$IMAGE\" || { echo \"BitBake failed\"; exit 1; }
+
+          echo \"Build complete!\"
+        '
+      "
+    tty: true
+volumes:
+  yocto-build:
