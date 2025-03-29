@@ -2,8 +2,8 @@ image: gitpod/workspace-base
 
 env:
   DISTRO: poky-altcfg
-  DEVICE: raspberrypi5-64
-  IMAGE: aws-iot-greengrass-lite-with-arpscan
+  BITBAKE_TARGET: aws-iot-greengrass-lite-with-arpscan
+  DEVICE: raspberrypi5-64-with-arpscan
 
 tasks:
   - name: Setup and Configure Build Environment
@@ -20,22 +20,32 @@ tasks:
       sudo locale-gen en_US.UTF-8 || { echo "ERROR: locale-gen failed" >&2; exit 1; }
       pip3 install --no-cache-dir pipoe || { echo "ERROR: pip3 install failed" >&2; exit 1; }
 
-      # Ensure git submodules are initialized and updated
-      git submodule update --init --recursive || { echo "ERROR: git submodule update failed" >&2; exit 1; }
+      [ ! -d "poky" ] && git clone --depth=1 -b scarthgap git://git.yoctoproject.org/poky.git poky
+      [ ! -d "meta-raspberrypi" ] && git clone --depth=1 -b scarthgap git://git.yoctoproject.org/meta-raspberrypi meta-raspberrypi
+      [ ! -d "meta-openembedded" ] && git clone --depth=1 -b scarthgap git://git.openembedded.org/meta-openembedded meta-openembedded
+      [ ! -d "meta-aws" ] && git clone --depth=1 -b scarthgap https://github.com/aws4embeddedlinux/meta-aws meta-aws
+      [ ! -d "meta-rauc-community" ] && git clone --depth=1 -b scarthgap https://github.com/rauc/meta-rauc-community meta-rauc-community
+      [ ! -d "meta-rauc" ] && git clone --depth=1 -b scarthgap https://github.com/rauc/meta-rauc meta-rauc
 
-      export BB_ENV_PASSTHROUGH_ADDITIONS="DISTRO DEVICE IMAGE $BB_ENV_PASSTHROUGH_ADDITIONS"
+      export BB_ENV_PASSTHROUGH_ADDITIONS="DISTRO DEVICE $BB_ENV_PASSTH-ROUGH_ADDITIONS"
+      source ./poky/oe-init-build-env build
 
-      # Run the Amazon build-init script (adjusted for meta-aws-iot)
-      ./meta-aws-iot/build-init build || { echo "ERROR: build-init failed" >&2; exit 1; }
+      cp "../meta-aws-iot/conf/templates/default/local.conf.sample" conf/local.conf
+      cp "../meta-aws-iotconf/templates/default/bblayers.conf.sample" conf/bblayers.conf
 
-      # Correctly set the DEVICE and IMAGE variables
-      export DEVICE="$DEVICE"
-      export IMAGE="$IMAGE"
+      DEVICE_CONF="../meta-aws-iot/conf/devices/$DEVICE/config.conf"
+      if [ -f "$DEVICE_CONF" ]; then
+        cat "$DEVICE_CONF" >> conf/local.conf
+      else
+        echo "ERROR: Device config $DEVICE_CONF not found!" >&2;
+        exit 1;
+      fi
 
-      # Run bitbake
-      bitbake "$IMAGE"
+      # move the comment to a new line
+      sed -i 's/1K"# Machine/1K"\n# Machine/g' conf/local.conf
 
-      echo "Build complete!"
+      echo "Setup complete! Run 'bitbake $BITBAKE_TARGET' to build."
+
 vscode:
   extensions:
     - ms-vscode.cpptools
