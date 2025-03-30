@@ -48,13 +48,18 @@ services:
 
         echo '=== Cloning repository ==='
         if [ ! -d "repo/.git" ]; then
-          git clone --progress "$REPO_URL" repo || { echo 'Git clone failed'; exit 1; }
-          cd repo
-          git config --global --add safe.directory /app/repo
-          git submodule update --init --recursive || echo 'Submodule update failed'
+          if [ -d "repo" ]; then
+            echo "ERROR: repo directory exists but is not a git repository. Please ensure the repo directory is properly initialized."
+            exit 1
+          else
+            git clone --progress "$REPO_URL" repo || { echo 'Git clone failed'; exit 1; }
+            cd repo
+            git config --global --add safe.directory /app/repo
+            git submodule update --init --recursive || echo 'Submodule update failed'
+          fi
         else
           cd repo
-          echo 'Repository already exists, updating...'
+          echo 'Repository exists, updating...'
           git fetch --all || echo 'Git fetch failed'
           git submodule update --init --recursive || echo 'Submodule update failed'
         fi
@@ -69,8 +74,13 @@ services:
           echo \"=== Initializing build ===\"
           source ./poky/oe-init-build-env build || { echo \"Failed to initialize Yocto\"; exit 1; }
           echo \"=== Configuring layers ===\"
+          
+          # Copy and process configuration files
           cp ../meta-aws-iot/conf/templates/default/local.conf.sample conf/local.conf || echo \"Failed to copy local.conf\"
           cp ../meta-aws-iot/conf/templates/default/bblayers.conf.sample conf/bblayers.conf || echo \"Failed to copy bblayers.conf\"
+          
+          # Replace OEROOT placeholder with actual path
+          sed -i "s|##OEROOT##|${OEROOT}|g" conf/bblayers.conf
           
           # Handle configuration files with proper path resolution
           if [ -f \"../$DEVICE_CONF\" ]; then
