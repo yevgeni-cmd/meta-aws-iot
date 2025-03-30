@@ -1,11 +1,11 @@
+version: '3.8'
+
 services:
-  build:
+  yocto-builder:
     image: ubuntu:22.04
     container_name: yocto
     platform: linux/amd64
     working_dir: /app
-    volumes:
-      - ./repo:/app/repo
     env_file:
       - .env
     environment:
@@ -17,101 +17,123 @@ services:
       DEVICE_LAYERS: ${DEVICE_LAYERS}
       IMAGE_LAYERS: ${IMAGE_LAYERS}
       DEBIAN_FRONTEND: noninteractive
+      BB_NUMBER_THREADS: ${BB_NUMBER_THREADS}
+      PARALLEL_MAKE: ${PARALLEL_MAKE}
+    restart: unless-stopped
     tty: true
     stdin_open: true
+    healthcheck:
+      test: ["CMD", "bash", "-c", "ps aux | grep -v grep | grep -q bitbake || exit 1"]
+      interval: 5m
+      timeout: 5s
+      retries: 3
+    mem_limit: "12g"
+    cpus: 6
+    networks:
+      - yocto_network
+    shm_size: '2gb'
     command: >
       bash -c '
-        echo "=== Checking environment variables ==="
-        if [ -z "$REPO_URL" ]; then echo "ERROR: REPO_URL is missing"; exit 1; fi
-        if [ -z "$DEVICE" ]; then echo "ERROR: DEVICE is missing"; exit 1; fi
-        if [ -z "$IMAGE" ]; then echo "ERROR: IMAGE is missing"; exit 1; fi
-        if [ -z "$DISTRO" ]; then echo "ERROR: DISTRO is missing"; exit 1; fi
-        if [ -z "$DEVICE_CONF" ]; then echo "ERROR: DEVICE_CONF is missing"; exit 1; fi
-        if [ -z "$DEVICE_LAYERS" ]; then echo "ERROR: DEVICE_LAYERS is missing"; exit 1; fi
-        if [ -z "$IMAGE_LAYERS" ]; then echo "ERROR: IMAGE_LAYERS is missing"; exit 1; fi
+        mkdir -p /app/logs
 
-        echo "=== Installing dependencies ==="
+        echo "=== Checking environment variables ===" | tee -a /app/logs/build.log
+        if [ -z "$REPO_URL" ]; then echo "ERROR: REPO_URL is missing" | tee -a /app/logs/build.log; exit 1; fi
+        if [ -z "$DEVICE" ]; then echo "ERROR: DEVICE is missing" | tee -a /app/logs/build.log; exit 1; fi
+        if [ -z "$IMAGE" ]; then echo "ERROR: IMAGE is missing" | tee -a /app/logs/build.log; exit 1; fi
+        if [ -z "$DISTRO" ]; then echo "ERROR: DISTRO is missing" | tee -a /app/logs/build.log; exit 1; fi
+        if [ -z "$DEVICE_CONF" ]; then echo "ERROR: DEVICE_CONF is missing" | tee -a /app/logs/build.log; exit 1; fi
+        if [ -z "$DEVICE_LAYERS" ]; then echo "ERROR: DEVICE_LAYERS is missing" | tee -a /app/logs/build.log; exit 1; fi
+        if [ -z "$IMAGE_LAYERS" ]; then echo "ERROR: IMAGE_LAYERS is missing" | tee -a /app/logs/build.log; exit 1; fi
+
+        echo "=== Installing dependencies ===" | tee -a /app/logs/build.log
         apt-get update && apt-get install -y --no-install-recommends \
           gawk wget git diffstat unzip texinfo gcc build-essential \
           chrpath socat cpio python3 python3-pip python3-pexpect xz-utils \
           debianutils iputils-ping python3-git python3-jinja2 libegl1-mesa \
           libsdl1.2-dev pylint python3-subunit mesa-common-dev zstd \
           liblz4-tool file locales ca-certificates \
-          || { echo "Package install failed"; exit 1; }
+          python3-dev libffi-dev libssl-dev \
+          tmux vim sudo python3-setuptools \
+          || { echo "Package install failed" | tee -a /app/logs/build.log; exit 1; }
 
-        echo "=== Configuring locales ==="
+        echo "=== Configuring locales ===" | tee -a /app/logs/build.log
         locale-gen en_US.UTF-8
         export LANG=en_US.UTF-8
 
-        echo "=== Creating yocto user ==="
+        echo "=== Creating directories ===" | tee -a /app/logs/build.log
+        mkdir -p /app/logs
+
+        echo "=== Creating yocto user ===" | tee -a /app/logs/build.log
         useradd -m -s /bin/bash yocto || echo "User already exists"
+        echo "yocto ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/yocto
+        
 
-        # Set proper permissions for the yocto user
-        chown -R yocto:yocto /app/repo
+        echo "=== Repository initialization/update ===" | tee -a /app/logs/build.log
+        git clone --progress \"$REPO_URL\" repo || { echo "Git clone failed"; exit 1; }
+        cd repo
+        git config --global --add safe.directory /app/repo
+        git submodule update --init --recursive || echo "Submodule update failed"
+        
+        chown -R yocto:yocto /app/repo /app/logs
         chmod -R 755 /app/repo
+        
+        echo "=== Setting up Yocto build environment ===" | tee -a /app/logs/build.log
+        mkdir -p /app/repo/build/downloads /app/repo/build/sstate-cache
 
-        echo "=== Cloning repository ==="
-        if [ ! -d "repo/.git" ]; then
-          if [ -d "repo" ]; then
-            echo "ERROR: repo directory exists but is not a git repository. Please ensure the repo directory is properly initialized."
-            exit 1
-          else
-            git clone --progress "$REPO_URL" repo || { echo "Git clone failed"; exit 1; }
-            cd repo
-            git config --global --add safe.directory /app/repo
-            git submodule update --init --recursive || echo "Submodule update failed"
-          fi
-        else
-          cd repo
-          echo "Repository exists, updating..."
-          git fetch --all || echo "Git fetch failed"
-          git submodule update --init --recursive || echo "Submodule update failed"
+        if [ ! -d poky ]; then 
+          echo "ERROR: poky directory not found. Please ensure submodules are properly initialized." | tee -a /app/logs/build.log
+          exit 1
         fi
 
-        echo "=== Setting up Yocto build environment ==="
-        if [ ! -d poky ]; then echo "ERROR: poky directory not found"; ls -la; exit 1; fi
-
-        echo "=== Running build as yocto user ==="
+        echo "=== Running build as yocto user ===" | tee -a /app/logs/build.log
         su yocto -c "
           cd /app/repo
           export PATH=\"/home/yocto/.local/bin:$PATH\"
-          echo \"=== Initializing build ===\"
-          source ./poky/oe-init-build-env build || { echo \"Failed to initialize Yocto\"; exit 1; }
-          echo \"=== Configuring layers ===\"
+          echo \"=== Initializing build ===\" | tee -a /app/logs/build.log
+          source ./poky/oe-init-build-env build || { echo \"Failed to initialize Yocto\" | tee -a /app/logs/build.log; exit 1; }
+          echo \"=== Configuring layers ===\" | tee -a /app/logs/build.log
           
-          # Copy and process configuration files
-          cp ../meta-aws-iot/conf/templates/default/local.conf.sample conf/local.conf || echo \"Failed to copy local.conf\"
-          cp ../meta-aws-iot/conf/templates/default/bblayers.conf.sample conf/bblayers.conf || echo \"Failed to copy bblayers.conf\"
+          cp ../meta-aws-iot/conf/templates/default/local.conf.sample conf/local.conf || echo \"Failed to copy local.conf\" | tee -a /app/logs/build.log
+          cp ../meta-aws-iot/conf/templates/default/bblayers.conf.sample conf/bblayers.conf || echo \"Failed to copy bblayers.conf\" | tee -a /app/logs/build.log
           
-          # Replace OEROOT placeholder with poky path
           sed -i \"s|##OEROOT##|/app/repo/poky|g\" conf/bblayers.conf
           
-          # Handle configuration files with proper path resolution
-          if [ -f \"$DEVICE_CONF\" ]; then
-            echo \"Adding device configuration from $DEVICE_CONF\"
-            cat \"$DEVICE_CONF\" >> conf/local.conf
+          if [ -f "$DEVICE_CONF" ]; then
+            echo "Adding device configuration from $DEVICE_CONF" | tee -a /app/logs/build.log
+            cat "$DEVICE_CONF" >> conf/local.conf
           else
-            echo \"Warning: Device configuration file not found at $DEVICE_CONF\"
+            echo "Warning: Device configuration file not found at $DEVICE_CONF" | tee -a /app/logs/build.log
           fi
           
-          if [ -f \"$DEVICE_LAYERS\" ]; then
-            echo \"Adding device layers from $DEVICE_LAYERS\"
-            cat \"$DEVICE_LAYERS\" >> conf/bblayers.conf
+          if [ -f "$DEVICE_LAYERS" ]; then
+            echo "Adding device layers from $DEVICE_LAYERS" | tee -a /app/logs/build.log
+            cat "$DEVICE_LAYERS" >> conf/bblayers.conf
           else
-            echo \"Warning: Device layers file not found at $DEVICE_LAYERS\"
+            echo "Warning: Device layers file not found at $DEVICE_LAYERS" | tee -a /app/logs/build.log
           fi
           
-          if [ -f \"$IMAGE_LAYERS\" ]; then
-            echo \"Adding image layers from $IMAGE_LAYERS\"
-            cat \"$IMAGE_LAYERS\" >> conf/bblayers.conf
+          if [ -f "$IMAGE_LAYERS" ]; then
+            echo "Adding image layers from $IMAGE_LAYERS" | tee -a /app/logs/build.log
+            cat "$IMAGE_LAYERS" >> conf/bblayers.conf
           else
-            echo \"Warning: Image layers file not found at $IMAGE_LAYERS\"
+            echo "Warning: Image layers file not found at $IMAGE_LAYERS" | tee -a /app/logs/build.log
           fi
           
-          echo \"=== Starting Bitbake build ===\"
-          bitbake \"$IMAGE\" || echo \"Bitbake failed\"
+          echo \"DL_DIR = \\\"/app/repo/build/downloads\\\"\" >> conf/local.conf
+          echo \"SSTATE_DIR = \\\"/app/repo/build/sstate-cache\\\"\" >> conf/local.conf
+          
+          echo \"BB_NUMBER_THREADS = \\\"$BB_NUMBER_THREADS\\\"\" >> conf/local.conf
+          echo \"PARALLEL_MAKE = \\\"$PARALLEL_MAKE\\\"\" >> conf/local.conf
+          
+          echo \"=== Starting Bitbake build ===\" | tee -a /app/logs/build.log
+          bitbake \"$IMAGE\" 2>&1 | tee -a /app/logs/build.log || echo \"Bitbake failed\" | tee -a /app/logs/build.log
         "
 
-        echo "=== Build complete. Container is running for debugging. ==="
+        echo "=== Build complete. Container is running for debugging. ===" | tee -a /app/logs/build.log
+        tail -f /app/logs/build.log &
         bash
       '
+
+networks:
+  yocto_network:
+    driver: bridge
