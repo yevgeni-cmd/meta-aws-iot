@@ -20,55 +20,59 @@ services:
     tty: true
     stdin_open: true
     command: >
-      bash -c "
-        echo '=== Checking environment variables ==='
-        [ -z \"$REPO_URL\" ] && { echo 'ERROR: REPO_URL is missing'; exit 1; }
-        [ -z \"$DEVICE\" ] && { echo 'ERROR: DEVICE is missing'; exit 1; }
-        [ -z \"$IMAGE\" ] && { echo 'ERROR: IMAGE is missing'; exit 1; }
-        [ -z \"$DISTRO\" ] && { echo 'ERROR: DISTRO is missing'; exit 1; }
-        [ -z \"$DEVICE_CONF\" ] && { echo 'ERROR: DEVICE_CONF is missing'; exit 1; }
-        [ -z \"$DEVICE_LAYERS\" ] && { echo 'ERROR: DEVICE_LAYERS is missing'; exit 1; }
-        [ -z \"$IMAGE_LAYERS\" ] && { echo 'ERROR: IMAGE_LAYERS is missing'; exit 1; }
+      bash -c '
+        echo "=== Checking environment variables ==="
+        if [ -z "$REPO_URL" ]; then echo "ERROR: REPO_URL is missing"; exit 1; fi
+        if [ -z "$DEVICE" ]; then echo "ERROR: DEVICE is missing"; exit 1; fi
+        if [ -z "$IMAGE" ]; then echo "ERROR: IMAGE is missing"; exit 1; fi
+        if [ -z "$DISTRO" ]; then echo "ERROR: DISTRO is missing"; exit 1; fi
+        if [ -z "$DEVICE_CONF" ]; then echo "ERROR: DEVICE_CONF is missing"; exit 1; fi
+        if [ -z "$DEVICE_LAYERS" ]; then echo "ERROR: DEVICE_LAYERS is missing"; exit 1; fi
+        if [ -z "$IMAGE_LAYERS" ]; then echo "ERROR: IMAGE_LAYERS is missing"; exit 1; fi
 
-        echo '=== Installing dependencies ==='
-        apt-get update && apt-get install -y --no-install-recommends \\
-          gawk wget git diffstat unzip texinfo gcc build-essential \\
-          chrpath socat cpio python3 python3-pip python3-pexpect xz-utils \\
-          debianutils iputils-ping python3-git python3-jinja2 libegl1-mesa \\
-          libsdl1.2-dev pylint python3-subunit mesa-common-dev zstd \\
-          liblz4-tool file locales ca-certificates \\
-          || { echo 'Package install failed'; exit 1; }
+        echo "=== Installing dependencies ==="
+        apt-get update && apt-get install -y --no-install-recommends \
+          gawk wget git diffstat unzip texinfo gcc build-essential \
+          chrpath socat cpio python3 python3-pip python3-pexpect xz-utils \
+          debianutils iputils-ping python3-git python3-jinja2 libegl1-mesa \
+          libsdl1.2-dev pylint python3-subunit mesa-common-dev zstd \
+          liblz4-tool file locales ca-certificates \
+          || { echo "Package install failed"; exit 1; }
 
-        echo '=== Configuring locales ==='
+        echo "=== Configuring locales ==="
         locale-gen en_US.UTF-8
         export LANG=en_US.UTF-8
 
-        echo '=== Creating yocto user ==='
-        useradd -m -s /bin/bash yocto || echo 'User already exists'
+        echo "=== Creating yocto user ==="
+        useradd -m -s /bin/bash yocto || echo "User already exists"
 
-        echo '=== Cloning repository ==='
+        # Set proper permissions for the yocto user
+        chown -R yocto:yocto /app/repo
+        chmod -R 755 /app/repo
+
+        echo "=== Cloning repository ==="
         if [ ! -d "repo/.git" ]; then
           if [ -d "repo" ]; then
             echo "ERROR: repo directory exists but is not a git repository. Please ensure the repo directory is properly initialized."
             exit 1
           else
-            git clone --progress "$REPO_URL" repo || { echo 'Git clone failed'; exit 1; }
+            git clone --progress "$REPO_URL" repo || { echo "Git clone failed"; exit 1; }
             cd repo
             git config --global --add safe.directory /app/repo
-            git submodule update --init --recursive || echo 'Submodule update failed'
+            git submodule update --init --recursive || echo "Submodule update failed"
           fi
         else
           cd repo
-          echo 'Repository exists, updating...'
-          git fetch --all || echo 'Git fetch failed'
-          git submodule update --init --recursive || echo 'Submodule update failed'
+          echo "Repository exists, updating..."
+          git fetch --all || echo "Git fetch failed"
+          git submodule update --init --recursive || echo "Submodule update failed"
         fi
 
-        echo '=== Setting up Yocto build environment ==='
-        [ ! -d poky ] && { echo 'ERROR: poky directory not found'; ls -la; exit 1; }
+        echo "=== Setting up Yocto build environment ==="
+        if [ ! -d poky ]; then echo "ERROR: poky directory not found"; ls -la; exit 1; fi
 
-        echo '=== Running build as yocto user ==='
-        su yocto -c '
+        echo "=== Running build as yocto user ==="
+        su yocto -c "
           cd /app/repo
           export PATH=\"/home/yocto/.local/bin:$PATH\"
           echo \"=== Initializing build ===\"
@@ -79,35 +83,35 @@ services:
           cp ../meta-aws-iot/conf/templates/default/local.conf.sample conf/local.conf || echo \"Failed to copy local.conf\"
           cp ../meta-aws-iot/conf/templates/default/bblayers.conf.sample conf/bblayers.conf || echo \"Failed to copy bblayers.conf\"
           
-          # Replace OEROOT placeholder with actual path
-          sed -i "s|##OEROOT##|${OEROOT}|g" conf/bblayers.conf
+          # Replace OEROOT placeholder with poky path
+          sed -i \"s|##OEROOT##|/app/repo/poky|g\" conf/bblayers.conf
           
           # Handle configuration files with proper path resolution
-          if [ -f \"../$DEVICE_CONF\" ]; then
-            echo \"Adding device configuration from ../$DEVICE_CONF\"
-            cat \"../$DEVICE_CONF\" >> conf/local.conf
+          if [ -f \"$DEVICE_CONF\" ]; then
+            echo \"Adding device configuration from $DEVICE_CONF\"
+            cat \"$DEVICE_CONF\" >> conf/local.conf
           else
-            echo \"Warning: Device configuration file not found at ../$DEVICE_CONF\"
+            echo \"Warning: Device configuration file not found at $DEVICE_CONF\"
           fi
           
-          if [ -f \"../$DEVICE_LAYERS\" ]; then
-            echo \"Adding device layers from ../$DEVICE_LAYERS\"
-            cat \"../$DEVICE_LAYERS\" >> conf/bblayers.conf
+          if [ -f \"$DEVICE_LAYERS\" ]; then
+            echo \"Adding device layers from $DEVICE_LAYERS\"
+            cat \"$DEVICE_LAYERS\" >> conf/bblayers.conf
           else
-            echo \"Warning: Device layers file not found at ../$DEVICE_LAYERS\"
+            echo \"Warning: Device layers file not found at $DEVICE_LAYERS\"
           fi
           
-          if [ -f \"../$IMAGE_LAYERS\" ]; then
-            echo \"Adding image layers from ../$IMAGE_LAYERS\"
-            cat \"../$IMAGE_LAYERS\" >> conf/bblayers.conf
+          if [ -f \"$IMAGE_LAYERS\" ]; then
+            echo \"Adding image layers from $IMAGE_LAYERS\"
+            cat \"$IMAGE_LAYERS\" >> conf/bblayers.conf
           else
-            echo \"Warning: Image layers file not found at ../$IMAGE_LAYERS\"
+            echo \"Warning: Image layers file not found at $IMAGE_LAYERS\"
           fi
           
           echo \"=== Starting Bitbake build ===\"
           bitbake \"$IMAGE\" || echo \"Bitbake failed\"
-        '
+        "
 
-        echo '=== Build complete. Container is running for debugging. ==='
+        echo "=== Build complete. Container is running for debugging. ==="
         bash
-      "
+      '
