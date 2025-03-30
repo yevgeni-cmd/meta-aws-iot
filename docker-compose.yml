@@ -4,6 +4,8 @@ services:
     container_name: yocto
     platform: linux/amd64
     working_dir: /app
+    volumes:
+      - ./repo:/app/repo
     env_file:
       - .env
     environment:
@@ -45,10 +47,17 @@ services:
         useradd -m -s /bin/bash yocto || echo 'User already exists'
 
         echo '=== Cloning repository ==='
-        git clone --progress \"$REPO_URL\" repo || { echo 'Git clone failed'; exit 1; }
-        cd repo
-        git config --global --add safe.directory /app/repo
-        git submodule update --init --recursive || echo 'Submodule update failed'
+        if [ ! -d "repo/.git" ]; then
+          git clone --progress "$REPO_URL" repo || { echo 'Git clone failed'; exit 1; }
+          cd repo
+          git config --global --add safe.directory /app/repo
+          git submodule update --init --recursive || echo 'Submodule update failed'
+        else
+          cd repo
+          echo 'Repository already exists, updating...'
+          git fetch --all || echo 'Git fetch failed'
+          git submodule update --init --recursive || echo 'Submodule update failed'
+        fi
 
         echo '=== Setting up Yocto build environment ==='
         [ ! -d poky ] && { echo 'ERROR: poky directory not found'; ls -la; exit 1; }
@@ -62,9 +71,29 @@ services:
           echo \"=== Configuring layers ===\"
           cp ../meta-aws-iot/conf/templates/default/local.conf.sample build/conf/local.conf || echo \"Failed to copy local.conf\"
           cp ../meta-aws-iot/conf/templates/default/bblayers.conf.sample build/conf/bblayers.conf || echo \"Failed to copy bblayers.conf\"
-          [ -f \"$DEVICE_CONF\" ] && [ -s \"$DEVICE_CONF\" ] && cat \"$DEVICE_CONF\" >> build/conf/local.conf || echo \"Skipping DEVICE_CONF\"
-          [ -f \"$DEVICE_LAYERS\" ] && [ -s \"$DEVICE_LAYERS\" ] && cat \"$DEVICE_LAYERS\" >> build/conf/bblayers.conf || echo \"Skipping DEVICE_LAYERS\"
-          [ -f \"$IMAGE_LAYERS\" ] && [ -s \"$IMAGE_LAYERS\" ] && cat \"$IMAGE_LAYERS\" >> build/conf/bblayers.conf || echo \"Skipping IMAGE_LAYERS\"
+          
+          # Handle configuration files with proper path resolution
+          if [ -f \"../$DEVICE_CONF\" ]; then
+            echo \"Adding device configuration from ../$DEVICE_CONF\"
+            cat \"../$DEVICE_CONF\" >> build/conf/local.conf
+          else
+            echo \"Warning: Device configuration file not found at ../$DEVICE_CONF\"
+          fi
+          
+          if [ -f \"../$DEVICE_LAYERS\" ]; then
+            echo \"Adding device layers from ../$DEVICE_LAYERS\"
+            cat \"../$DEVICE_LAYERS\" >> build/conf/bblayers.conf
+          else
+            echo \"Warning: Device layers file not found at ../$DEVICE_LAYERS\"
+          fi
+          
+          if [ -f \"../$IMAGE_LAYERS\" ]; then
+            echo \"Adding image layers from ../$IMAGE_LAYERS\"
+            cat \"../$IMAGE_LAYERS\" >> build/conf/bblayers.conf
+          else
+            echo \"Warning: Image layers file not found at ../$IMAGE_LAYERS\"
+          fi
+          
           echo \"=== Starting Bitbake build ===\"
           bitbake \"$IMAGE\" || echo \"Bitbake failed\"
         '
