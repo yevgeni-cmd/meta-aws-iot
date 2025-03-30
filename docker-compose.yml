@@ -69,27 +69,27 @@ services:
           echo \"=== Initializing build ===\"
           source ./poky/oe-init-build-env build || { echo \"Failed to initialize Yocto\"; exit 1; }
           echo \"=== Configuring layers ===\"
-          cp ../meta-aws-iot/conf/templates/default/local.conf.sample build/conf/local.conf || echo \"Failed to copy local.conf\"
-          cp ../meta-aws-iot/conf/templates/default/bblayers.conf.sample build/conf/bblayers.conf || echo \"Failed to copy bblayers.conf\"
+          cp ../meta-aws-iot/conf/templates/default/local.conf.sample conf/local.conf || echo \"Failed to copy local.conf\"
+          cp ../meta-aws-iot/conf/templates/default/bblayers.conf.sample conf/bblayers.conf || echo \"Failed to copy bblayers.conf\"
           
           # Handle configuration files with proper path resolution
           if [ -f \"../$DEVICE_CONF\" ]; then
             echo \"Adding device configuration from ../$DEVICE_CONF\"
-            cat \"../$DEVICE_CONF\" >> build/conf/local.conf
+            cat \"../$DEVICE_CONF\" >> conf/local.conf
           else
             echo \"Warning: Device configuration file not found at ../$DEVICE_CONF\"
           fi
           
           if [ -f \"../$DEVICE_LAYERS\" ]; then
             echo \"Adding device layers from ../$DEVICE_LAYERS\"
-            cat \"../$DEVICE_LAYERS\" >> build/conf/bblayers.conf
+            cat \"../$DEVICE_LAYERS\" >> conf/bblayers.conf
           else
             echo \"Warning: Device layers file not found at ../$DEVICE_LAYERS\"
           fi
           
           if [ -f \"../$IMAGE_LAYERS\" ]; then
             echo \"Adding image layers from ../$IMAGE_LAYERS\"
-            cat \"../$IMAGE_LAYERS\" >> build/conf/bblayers.conf
+            cat \"../$IMAGE_LAYERS\" >> conf/bblayers.conf
           else
             echo \"Warning: Image layers file not found at ../$IMAGE_LAYERS\"
           fi
