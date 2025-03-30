@@ -1,5 +1,3 @@
-version: "3"
-
 services:
   build:
     image: ubuntu:22.04
@@ -9,76 +7,64 @@ services:
     env_file:
       - .env
     environment:
-      REPO_URL: ${REPO_URL:?Error: REPO_URL is required}
-      DEVICE: ${DEVICE:?Error: DEVICE is required}
-      IMAGE: ${IMAGE:?Error: IMAGE is required}
-      DISTRO: ${DISTRO:?Error: DISTRO is required}
-      DEVICE_CONF: ${DEVICE_CONF:?Error: DEVICE_CONF is required}
-      DEVICE_LAYERS: ${DEVICE_LAYERS:?Error: DEVICE_LAYERS is required}
-      IMAGE_LAYERS: ${IMAGE_LAYERS:?Error: IMAGE_LAYERS is required}
+      REPO_URL: ${REPO_URL}
+      DEVICE: ${DEVICE}
+      IMAGE: ${IMAGE}
+      DISTRO: ${DISTRO}
+      DEVICE_CONF: ${DEVICE_CONF}
+      DEVICE_LAYERS: ${DEVICE_LAYERS}
+      IMAGE_LAYERS: ${IMAGE_LAYERS}
       DEBIAN_FRONTEND: noninteractive
-    volumes:
-      - ./yocto-repo:/app/repo  # Persistent volume to avoid re-cloning
     tty: true
     stdin_open: true
     command: >
       bash -c "
         echo '=== Checking environment variables ==='
-        [ -z \"$REPO_URL\" ] && echo 'ERROR: REPO_URL is missing' && exit 1
-        [ -z \"$DEVICE\" ] && echo 'ERROR: DEVICE is missing' && exit 1
-        [ -z \"$IMAGE\" ] && echo 'ERROR: IMAGE is missing' && exit 1
-        [ -z \"$DISTRO\" ] && echo 'ERROR: DISTRO is missing' && exit 1
-        [ -z \"$DEVICE_CONF\" ] && echo 'ERROR: DEVICE_CONF is missing' && exit 1
-        [ -z \"$DEVICE_LAYERS\" ] && echo 'ERROR: DEVICE_LAYERS is missing' && exit 1
-        [ -z \"$IMAGE_LAYERS\" ] && echo 'ERROR: IMAGE_LAYERS is missing' && exit 1
+        [ -z \"$REPO_URL\" ] && { echo 'ERROR: REPO_URL is missing'; exit 1; }
+        [ -z \"$DEVICE\" ] && { echo 'ERROR: DEVICE is missing'; exit 1; }
+        [ -z \"$IMAGE\" ] && { echo 'ERROR: IMAGE is missing'; exit 1; }
+        [ -z \"$DISTRO\" ] && { echo 'ERROR: DISTRO is missing'; exit 1; }
+        [ -z \"$DEVICE_CONF\" ] && { echo 'ERROR: DEVICE_CONF is missing'; exit 1; }
+        [ -z \"$DEVICE_LAYERS\" ] && { echo 'ERROR: DEVICE_LAYERS is missing'; exit 1; }
+        [ -z \"$IMAGE_LAYERS\" ] && { echo 'ERROR: IMAGE_LAYERS is missing'; exit 1; }
 
         echo '=== Installing dependencies ==='
-        apt-get update && apt-get install -y --no-install-recommends \
-          gawk wget git diffstat unzip texinfo gcc build-essential \
-          chrpath socat cpio python3 python3-pip python3-pexpect xz-utils \
-          debianutils iputils-ping python3-git python3-jinja2 libegl1-mesa \
-          libsdl1.2-dev pylint python3-subunit mesa-common-dev zstd \
-          liblz4-tool file locales systemd sudo || echo 'Package install failed'
+        apt-get update && apt-get install -y --no-install-recommends \\
+          gawk wget git diffstat unzip texinfo gcc build-essential \\
+          chrpath socat cpio python3 python3-pip python3-pexpect xz-utils \\
+          debianutils iputils-ping python3-git python3-jinja2 libegl1-mesa \\
+          libsdl1.2-dev pylint python3-subunit mesa-common-dev zstd \\
+          liblz4-tool file locales ca-certificates \\
+          || { echo 'Package install failed'; exit 1; }
 
+        echo '=== Configuring locales ==='
         locale-gen en_US.UTF-8
         export LANG=en_US.UTF-8
 
         echo '=== Creating yocto user ==='
         useradd -m -s /bin/bash yocto || echo 'User already exists'
-        chown -R yocto:yocto /app || echo 'Failed to set ownership'
 
-        echo '=== Checking if repository exists ==='
-        if [ -d /app/repo/.git ]; then
-          echo 'Existing repository found, skipping clone.'
-          cd /app/repo
-          git pull || echo 'Git pull failed'
-        else
-          echo 'Cloning repository...'
-          git clone \"$REPO_URL\" /app/repo || echo 'Git clone failed'
-        fi
-
-        echo '=== Updating submodules (if needed) ==='
-        cd /app/repo
+        echo '=== Cloning repository ==='
+        git clone --progress \"$REPO_URL\" repo || { echo 'Git clone failed'; exit 1; }
+        cd repo
+        git config --global --add safe.directory /app/repo
         git submodule update --init --recursive || echo 'Submodule update failed'
 
         echo '=== Setting up Yocto build environment ==='
-        su - yocto -c '
-          export PATH=/home/yocto/.local/bin:$PATH
-          export DEVICE_CONF=\"$DEVICE_CONF\"
-          export DEVICE_LAYERS=\"$DEVICE_LAYERS\"
-          export IMAGE_LAYERS=\"$IMAGE_LAYERS\"
+        [ ! -d poky ] && { echo 'ERROR: poky directory not found'; ls -la; exit 1; }
 
+        echo '=== Running build as yocto user ==='
+        su yocto -c '
+          cd /app/repo
+          export PATH=\"/home/yocto/.local/bin:$PATH\"
           echo \"=== Initializing build ===\"
-          source ./poky/oe-init-build-env build || echo \"Failed to initialize Yocto\"
-
+          source ./poky/oe-init-build-env build || { echo \"Failed to initialize Yocto\"; exit 1; }
           echo \"=== Configuring layers ===\"
-          cp \"../meta-aws-iot/conf/templates/default/local.conf.sample\" build/conf/local.conf || echo \"Failed to copy local.conf\"
-          cp \"../meta-aws-iot/conf/templates/default/bblayers.conf.sample\" build/conf/bblayers.conf || echo \"Failed to copy bblayers.conf\"
-
-          [ -f \"$DEVICE_CONF\" ] && cat \"$DEVICE_CONF\" >> build/conf/local.conf || echo \"Skipping DEVICE_CONF\"
-          [ -f \"$DEVICE_LAYERS\" ] && cat \"$DEVICE_LAYERS\" >> build/conf/bblayers.conf || echo \"Skipping DEVICE_LAYERS\"
-          [ -f \"$IMAGE_LAYERS\" ] && cat \"$IMAGE_LAYERS\" >> build/conf/bblayers.conf || echo \"Skipping IMAGE_LAYERS\"
-
+          cp ../meta-aws-iot/conf/templates/default/local.conf.sample build/conf/local.conf || echo \"Failed to copy local.conf\"
+          cp ../meta-aws-iot/conf/templates/default/bblayers.conf.sample build/conf/bblayers.conf || echo \"Failed to copy bblayers.conf\"
+          [ -f \"$DEVICE_CONF\" ] && [ -s \"$DEVICE_CONF\" ] && cat \"$DEVICE_CONF\" >> build/conf/local.conf || echo \"Skipping DEVICE_CONF\"
+          [ -f \"$DEVICE_LAYERS\" ] && [ -s \"$DEVICE_LAYERS\" ] && cat \"$DEVICE_LAYERS\" >> build/conf/bblayers.conf || echo \"Skipping DEVICE_LAYERS\"
+          [ -f \"$IMAGE_LAYERS\" ] && [ -s \"$IMAGE_LAYERS\" ] && cat \"$IMAGE_LAYERS\" >> build/conf/bblayers.conf || echo \"Skipping IMAGE_LAYERS\"
           echo \"=== Starting Bitbake build ===\"
           bitbake \"$IMAGE\" || echo \"Bitbake failed\"
         '
