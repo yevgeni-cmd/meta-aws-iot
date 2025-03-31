@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   yocto-builder:
     image: ubuntu:22.04
@@ -13,9 +11,6 @@ services:
       DEVICE: ${DEVICE}
       IMAGE: ${IMAGE}
       DISTRO: ${DISTRO}
-      DEVICE_CONF: ${DEVICE_CONF}
-      DEVICE_LAYERS: ${DEVICE_LAYERS}
-      IMAGE_LAYERS: ${IMAGE_LAYERS}
       DEBIAN_FRONTEND: noninteractive
       BB_NUMBER_THREADS: ${BB_NUMBER_THREADS}
       PARALLEL_MAKE: ${PARALLEL_MAKE}
@@ -41,9 +36,6 @@ services:
         if [ -z "$DEVICE" ]; then echo "ERROR: DEVICE is missing" | tee -a /app/logs/build.log; exit 1; fi
         if [ -z "$IMAGE" ]; then echo "ERROR: IMAGE is missing" | tee -a /app/logs/build.log; exit 1; fi
         if [ -z "$DISTRO" ]; then echo "ERROR: DISTRO is missing" | tee -a /app/logs/build.log; exit 1; fi
-        if [ -z "$DEVICE_CONF" ]; then echo "ERROR: DEVICE_CONF is missing" | tee -a /app/logs/build.log; exit 1; fi
-        if [ -z "$DEVICE_LAYERS" ]; then echo "ERROR: DEVICE_LAYERS is missing" | tee -a /app/logs/build.log; exit 1; fi
-        if [ -z "$IMAGE_LAYERS" ]; then echo "ERROR: IMAGE_LAYERS is missing" | tee -a /app/logs/build.log; exit 1; fi
 
         echo "=== Installing dependencies ===" | tee -a /app/logs/build.log
         apt-get update && apt-get install -y --no-install-recommends \
@@ -57,73 +49,41 @@ services:
           || { echo "Package install failed" | tee -a /app/logs/build.log; exit 1; }
 
         echo "=== Configuring locales ===" | tee -a /app/logs/build.log
-        locale-gen en_US.UTF-8
+        dpkg-reconfigure -f noninteractive locales && \
+        locale-gen en_US.UTF-8 || { echo "Failed to configure locales" | tee -a /app/logs/build.log; exit 1; }
         export LANG=en_US.UTF-8
-
-        echo "=== Creating directories ===" | tee -a /app/logs/build.log
-        mkdir -p /app/logs
 
         echo "=== Creating yocto user ===" | tee -a /app/logs/build.log
         useradd -m -s /bin/bash yocto || echo "User already exists"
+        mkdir -p /etc/sudoers.d
         echo "yocto ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/yocto
-        
+        chmod 0440 /etc/sudoers.d/yocto
 
         echo "=== Repository initialization/update ===" | tee -a /app/logs/build.log
-        git clone --progress \"$REPO_URL\" repo || { echo "Git clone failed"; exit 1; }
+        git clone --progress "$REPO_URL" repo || { echo "Git clone failed" | tee -a /app/logs/build.log; exit 1; }
         cd repo
         git config --global --add safe.directory /app/repo
         git submodule update --init --recursive || echo "Submodule update failed"
-        
+
         chown -R yocto:yocto /app/repo /app/logs
         chmod -R 755 /app/repo
-        
-        echo "=== Setting up Yocto build environment ===" | tee -a /app/logs/build.log
-        mkdir -p /app/repo/build/downloads /app/repo/build/sstate-cache
-
-        if [ ! -d poky ]; then 
-          echo "ERROR: poky directory not found. Please ensure submodules are properly initialized." | tee -a /app/logs/build.log
-          exit 1
-        fi
 
         echo "=== Running build as yocto user ===" | tee -a /app/logs/build.log
         su yocto -c "
           cd /app/repo
           export PATH=\"/home/yocto/.local/bin:$PATH\"
+          export BB_ENV_PASSTHROUGH_ADDITIONS=\"DISTRO DEVICE IMAGE BB_NUMBER_THREADS PARALLEL_MAKE\"
+          ROOT_DIR=$(pwd)
+          # Dynamically find the conf/templates/default directory
+          TEMPLATE_DIR=$(find \"$ROOT_DIR\" -maxdepth 2 -type d -path \"*/conf/templates/default\" | head -n 1)
+          if [ -z \"$TEMPLATE_DIR\" ]; then
+            echo \"ERROR: No conf/templates/default directory found in repo\" | tee -a /app/logs/build.log
+            exit 1
+          fi
+          export TEMPLATECONF=\"$TEMPLATE_DIR\"
+          echo \"Using TEMPLATECONF=$TEMPLATECONF\" | tee -a /app/logs/build.log
           echo \"=== Initializing build ===\" | tee -a /app/logs/build.log
           source ./poky/oe-init-build-env build || { echo \"Failed to initialize Yocto\" | tee -a /app/logs/build.log; exit 1; }
-          echo \"=== Configuring layers ===\" | tee -a /app/logs/build.log
-          
-          cp ../meta-aws-iot/conf/templates/default/local.conf.sample conf/local.conf || echo \"Failed to copy local.conf\" | tee -a /app/logs/build.log
-          cp ../meta-aws-iot/conf/templates/default/bblayers.conf.sample conf/bblayers.conf || echo \"Failed to copy bblayers.conf\" | tee -a /app/logs/build.log
-          
-          sed -i \"s|##OEROOT##|/app/repo/poky|g\" conf/bblayers.conf
-          
-          if [ -f "$DEVICE_CONF" ]; then
-            echo "Adding device configuration from $DEVICE_CONF" | tee -a /app/logs/build.log
-            cat "$DEVICE_CONF" >> conf/local.conf
-          else
-            echo "Warning: Device configuration file not found at $DEVICE_CONF" | tee -a /app/logs/build.log
-          fi
-          
-          if [ -f "$DEVICE_LAYERS" ]; then
-            echo "Adding device layers from $DEVICE_LAYERS" | tee -a /app/logs/build.log
-            cat "$DEVICE_LAYERS" >> conf/bblayers.conf
-          else
-            echo "Warning: Device layers file not found at $DEVICE_LAYERS" | tee -a /app/logs/build.log
-          fi
-          
-          if [ -f "$IMAGE_LAYERS" ]; then
-            echo "Adding image layers from $IMAGE_LAYERS" | tee -a /app/logs/build.log
-            cat "$IMAGE_LAYERS" >> conf/bblayers.conf
-          else
-            echo "Warning: Image layers file not found at $IMAGE_LAYERS" | tee -a /app/logs/build.log
-          fi
-          
-          echo \"DL_DIR = \\\"/app/repo/build/downloads\\\"\" >> conf/local.conf
-          echo \"SSTATE_DIR = \\\"/app/repo/build/sstate-cache\\\"\" >> conf/local.conf
-          
-          echo \"BB_NUMBER_THREADS = \\\"$BB_NUMBER_THREADS\\\"\" >> conf/local.conf
-          echo \"PARALLEL_MAKE = \\\"$PARALLEL_MAKE\\\"\" >> conf/local.conf
           
           echo \"=== Starting Bitbake build ===\" | tee -a /app/logs/build.log
           bitbake \"$IMAGE\" 2>&1 | tee -a /app/logs/build.log || echo \"Bitbake failed\" | tee -a /app/logs/build.log
