@@ -13,9 +13,7 @@ services:
       DISTRO: ${DISTRO}
       DEBIAN_FRONTEND: noninteractive
       BB_NUMBER_THREADS: ${BB_NUMBER_THREADS}
-      PARALLEL_MAKE: ${PARALLEL_MAKE}
-      TEMPLATE_DIR: ${ROOT_DIR}
-      TEMPLATECONF: ${TEMPLATE_DIR}
+      TEMPLATECONF: ${TEMPLATECONF}
     restart: unless-stopped
     tty: true
     stdin_open: true
@@ -32,7 +30,9 @@ services:
     command: >
       bash -c '
         mkdir -p /app/logs
-
+        
+        echo \"$TEMPLATECONF\"
+        
         echo "=== Checking environment variables ===" | tee -a /app/logs/build.log
         if [ -z "$REPO_URL" ]; then echo "ERROR: REPO_URL is missing" | tee -a /app/logs/build.log; exit 1; fi
         if [ -z "$DEVICE" ]; then echo "ERROR: DEVICE is missing" | tee -a /app/logs/build.log; exit 1; fi
@@ -75,12 +75,8 @@ services:
           cd /app/repo
           export PATH=\"/home/yocto/.local/bin:$PATH\"
           export BB_ENV_PASSTHROUGH_ADDITIONS=\"DISTRO DEVICE IMAGE BB_NUMBER_THREADS PARALLEL_MAKE\"
-          
-          if [ -z \"$TEMPLATE_DIR\" ]; then
-            echo \"ERROR: No conf/templates/default directory found in repo\" | tee -a /app/logs/build.log
-            exit 1
-          fi
-          export TEMPLATECONF
+
+          export TEMPLATECONF=\"$TEMPLATECONF\"
           echo \"Using TEMPLATECONF\" | tee -a /app/logs/build.log
           echo \"=== Initializing build ===\" | tee -a /app/logs/build.log
           source ./poky/oe-init-build-env build || { echo \"Failed to initialize Yocto\" | tee -a /app/logs/build.log; exit 1; }

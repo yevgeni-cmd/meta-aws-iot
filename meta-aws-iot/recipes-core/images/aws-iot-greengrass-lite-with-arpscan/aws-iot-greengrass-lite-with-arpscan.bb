@@ -99,7 +99,7 @@ EOF
 SUMMARY:append = " with AWS Greengrass Nucleus Lite"
 DESCRIPTION:append = " including AWS Greengrass Nucleus Lite for resource-constrained devices."
 
-LICENSE:append = " Apache-2.0"
+LICENSE:append = " & Apache-2.0"
 LIC_FILES_CHKSUM:append = " file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
 IMAGE_INSTALL:append = " greengrass-nucleus-lite"
