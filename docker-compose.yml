@@ -14,6 +14,8 @@ services:
       DEBIAN_FRONTEND: noninteractive
       BB_NUMBER_THREADS: ${BB_NUMBER_THREADS}
       PARALLEL_MAKE: ${PARALLEL_MAKE}
+      TEMPLATE_DIR: ${ROOT_DIR}
+      TEMPLATECONF: ${TEMPLATE_DIR}
     restart: unless-stopped
     tty: true
     stdin_open: true
@@ -73,15 +75,13 @@ services:
           cd /app/repo
           export PATH=\"/home/yocto/.local/bin:$PATH\"
           export BB_ENV_PASSTHROUGH_ADDITIONS=\"DISTRO DEVICE IMAGE BB_NUMBER_THREADS PARALLEL_MAKE\"
-          ROOT_DIR=$(pwd)
-          # Dynamically find the conf/templates/default directory
-          TEMPLATE_DIR=$(find \"$ROOT_DIR\" -maxdepth 2 -type d -path \"*/conf/templates/default\" | head -n 1)
+          
           if [ -z \"$TEMPLATE_DIR\" ]; then
             echo \"ERROR: No conf/templates/default directory found in repo\" | tee -a /app/logs/build.log
             exit 1
           fi
-          export TEMPLATECONF=\"$TEMPLATE_DIR\"
-          echo \"Using TEMPLATECONF=$TEMPLATECONF\" | tee -a /app/logs/build.log
+          export TEMPLATECONF
+          echo \"Using TEMPLATECONF\" | tee -a /app/logs/build.log
           echo \"=== Initializing build ===\" | tee -a /app/logs/build.log
           source ./poky/oe-init-build-env build || { echo \"Failed to initialize Yocto\" | tee -a /app/logs/build.log; exit 1; }
           
