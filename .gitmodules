@@ -52,7 +52,7 @@
 	branch = ricefish
 [submodule "meta-xilinx-tools"]
 	path = layers/bsp/meta-xilinx-tools
-	url = https://git.yoctoproject.org/meta-xilinx-tools
+	url = https://github.com/Xilinx/meta-xilinx-tools.git
 	branch = scarthgap
 [submodule "meta-xilinx"]
 	path = layers/bsp/meta-xilinx

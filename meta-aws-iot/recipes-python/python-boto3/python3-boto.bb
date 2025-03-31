@@ -9,7 +9,6 @@ inherit pipoe dynamic-pip
 PIPOE_PYPI_PACKAGE = "awsiotsdk"
 PIPOE_VERSION = "${AWS_IOT_SDK_VERSION}"
 
-# Include Boto3 as an additional dependency
 PIPOE_EXTRA_PACKAGES = "boto3"
 
 RDEPENDS:${PN} += "python3-core python3-boto3"
