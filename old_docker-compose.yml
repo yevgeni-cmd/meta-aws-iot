@@ -27,9 +27,6 @@ services:
     networks:
       - yocto_network
     shm_size: '2gb'
-    volumes:
-      - ./repo:/app/repo
-      - ./logs:/app/logs
     command: >
       bash -c '
         mkdir -p /app/logs
@@ -63,18 +60,10 @@ services:
         chmod 0440 /etc/sudoers.d/yocto
 
         echo "=== Repository initialization/update ===" | tee -a /app/logs/build.log
-        if [ ! -d "/app/repo/.git" ]; then
-          git clone --progress "$REPO_URL" /app/repo || { echo "Git clone failed" | tee -a /app/logs/build.log; exit 1; }
-          cd /app/repo
-          git config --global --add safe.directory /app/repo
-          git submodule update --init --recursive || { echo "Submodule update failed" | tee -a /app/logs/build.log; echo "Continuing anyway..."; }
-        else
-          cd /app/repo
-          git config --global --add safe.directory /app/repo
-          echo "Repository already exists, updating..." | tee -a /app/logs/build.log
-          git pull || { echo "Git pull failed" | tee -a /app/logs/build.log; }
-          git submodule update --init --recursive || { echo "Submodule update failed" | tee -a /app/logs/build.log; echo "Continuing anyway..."; }
-        fi
+        git clone --progress "$REPO_URL" repo || { echo "Git clone failed" | tee -a /app/logs/build.log; exit 1; }
+        cd repo
+        git config --global --add safe.directory /app/repo
+        git submodule update --init --recursive || echo "Submodule update failed"
 
         chown -R yocto:yocto /app/repo /app/logs
         chmod -R 755 /app/repo
@@ -88,7 +77,7 @@ services:
           export TEMPLATECONF=\"$TEMPLATECONF\"
           echo \"Using TEMPLATECONF\" | tee -a /app/logs/build.log
           echo \"=== Initializing build ===\" | tee -a /app/logs/build.log
-          source ./poky/oe-init-build-env build -c $TEMPLATECONF || { echo \"Failed to initialize Yocto\" | tee -a /app/logs/build.log; exit 1; }
+          source ./poky/oe-init-build-env build || { echo \"Failed to initialize Yocto\" | tee -a /app/logs/build.log; exit 1; }
           
           echo \"=== Starting Bitbake build ===\" | tee -a /app/logs/build.log
           bitbake \"$IMAGE\" 2>&1 | tee -a /app/logs/build.log || echo \"Bitbake failed\" | tee -a /app/logs/build.log

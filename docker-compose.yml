@@ -27,6 +27,9 @@ services:
     networks:
       - yocto_network
     shm_size: '2gb'
+    volumes:
+      - ./repo:/app/repo
+      - ./logs:/app/logs
     command: >
       bash -c '
         mkdir -p /app/logs
@@ -39,7 +42,7 @@ services:
 
         echo "=== Installing dependencies ===" | tee -a /app/logs/build.log
         apt-get update && apt-get install -y --no-install-recommends \
-          gawk wget git diffstat unzip texinfo gcc build-essential \
+          gawk wget git diffstat unzip texinfo gcc build-essential gcc-aarch64-linux-gnu \
           chrpath socat cpio python3 python3-pip python3-pexpect xz-utils \
           debianutils iputils-ping python3-git python3-jinja2 libegl1-mesa \
           libsdl1.2-dev pylint python3-subunit mesa-common-dev zstd \
@@ -60,10 +63,20 @@ services:
         chmod 0440 /etc/sudoers.d/yocto
 
         echo "=== Repository initialization/update ===" | tee -a /app/logs/build.log
-        git clone --progress "$REPO_URL" repo || { echo "Git clone failed" | tee -a /app/logs/build.log; exit 1; }
-        cd repo
-        git config --global --add safe.directory /app/repo
-        git submodule update --init --recursive || echo "Submodule update failed"
+        if [ ! -d "/app/repo/.git" ]; then
+          git clone --progress "$REPO_URL" /app/repo || { echo "Git clone failed" | tee -a /app/logs/build.log; exit 1; }
+          cd /app/repo
+          git config --global --add safe.directory /app/repo
+          git submodule update --init --recursive || { echo "Submodule update failed" | tee -a /app/logs/build.log; echo "Continuing anyway..."; }
+        else
+          cd /app/repo
+          echo "Repository already exists, updating..." | tee -a /app/logs/build.log
+          # Fix ownership and safe.directory for main repo and submodules
+          chown -R yocto:yocto /app/repo
+          find /app/repo -type d -name .git -exec sh -c "git config --global --add safe.directory {}/.." \; -exec chown -R yocto:yocto {} \;
+          git pull || { echo "Git pull failed" | tee -a /app/logs/build.log; }
+          git submodule update --init --recursive || { echo "Submodule update failed" | tee -a /app/logs/build.log; echo "Continuing anyway..."; }
+        fi
 
         chown -R yocto:yocto /app/repo /app/logs
         chmod -R 755 /app/repo
@@ -71,13 +84,20 @@ services:
         echo "=== Running build as yocto user ===" | tee -a /app/logs/build.log
         su yocto -c "
           cd /app/repo
-          export PATH=\"/home/yocto/.local/bin:$PATH\"
+          export PATH=\"/home/yocto/.local/bin:/app/repo/build/bitbake/bin:$PATH\"
           export BB_ENV_PASSTHROUGH_ADDITIONS=\"DISTRO DEVICE IMAGE BB_NUMBER_THREADS PARALLEL_MAKE\"
-
           export TEMPLATECONF=\"$TEMPLATECONF\"
-          echo \"Using TEMPLATECONF\" | tee -a /app/logs/build.log
+          echo \"Using TEMPLATECONF=$TEMPLATECONF\" | tee -a /app/logs/build.log
           echo \"=== Initializing build ===\" | tee -a /app/logs/build.log
-          source ./poky/oe-init-build-env build || { echo \"Failed to initialize Yocto\" | tee -a /app/logs/build.log; exit 1; }
+          # Reset build directory if incomplete
+          if [ ! -f build/conf/local.conf ] || [ ! -d build/bitbake ]; then
+            rm -rf build
+            source ./poky/oe-init-build-env build || { echo \"Failed to initialize Yocto\" | tee -a /app/logs/build.log; exit 1; }
+          fi
+          echo \"=== Configuring TMPDIR ===\" | tee -a /app/logs/build.log
+          mkdir -p /tmp/yocto-tmp
+          chown yocto:yocto /tmp/yocto-tmp
+          echo \"TMPDIR = \\\"/tmp/yocto-tmp\\\"\" >> build/conf/local.conf
           
           echo \"=== Starting Bitbake build ===\" | tee -a /app/logs/build.log
           bitbake \"$IMAGE\" 2>&1 | tee -a /app/logs/build.log || echo \"Bitbake failed\" | tee -a /app/logs/build.log

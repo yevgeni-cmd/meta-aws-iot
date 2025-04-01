@@ -1,4 +1,3 @@
-# meta-aws-iot/classes/pipoe.bbclass
 inherit python3native
 
 PIPOE_PYPI_PACKAGE ??= "${BPN}"
